@@ -32,12 +32,10 @@ export function parseRealtimeReport(data: any): RealtimeData {
 
     const users = parseInt(row.metricValues?.[0]?.value || "0");
     const pv = parseInt(row.metricValues?.[1]?.value || "0");
-    const conv = parseInt(row.metricValues?.[2]?.value || "0");
-    const evt = parseInt(row.metricValues?.[3]?.value || "0");
+    const evt = parseInt(row.metricValues?.[2]?.value || "0");
 
     activeUsers += users;
     pageviews += pv;
-    conversions += conv;
     events += evt;
 
     countryMap.set(country, (countryMap.get(country) || 0) + users);
@@ -86,7 +84,11 @@ export async function fetchRealtimeData(
     body: JSON.stringify({ propertyId, accessToken }),
   });
 
-  if (!res.ok) throw new Error("Failed to fetch realtime data");
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    console.error("GA Realtime API error:", res.status, errorData);
+    throw new Error(errorData.error || "Failed to fetch realtime data");
+  }
   const data = await res.json();
   return parseRealtimeReport(data);
 }

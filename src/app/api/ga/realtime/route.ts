@@ -18,7 +18,6 @@ export async function POST(req: NextRequest) {
     metrics: [
       { name: "activeUsers" },
       { name: "screenPageViews" },
-      { name: "keyEvents" },
       { name: "eventCount" },
     ],
   };
