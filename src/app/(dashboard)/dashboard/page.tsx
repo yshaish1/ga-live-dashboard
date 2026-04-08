@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { getStreams, getUserSettings, type GAStream, type UserSettings } from "@/lib/firestore";
-import { fetchRealtimeData, type RealtimeData } from "@/lib/ga-api";
+import { fetchRealtimeData, fetchHistoricalComparison, type RealtimeData, type HistoricalComparison } from "@/lib/ga-api";
 import { MetricCard } from "@/components/metric-card";
 import {
   TrafficSourcesChart,
@@ -11,7 +11,12 @@ import {
   TopPagesTable,
   CountryChart,
 } from "@/components/dashboard-charts";
-import { Users, Eye, Clock, TrendingDown, RefreshCw, LayoutGrid, Layers } from "lucide-react";
+import { SparklineChart } from "@/components/sparkline-chart";
+import { TopEventsTable } from "@/components/top-events-table";
+import { AlertManagerButton } from "@/components/alert-manager";
+import { useAlerts } from "@/lib/use-alerts";
+import { useTVMode } from "@/lib/tv-mode-context";
+import { Users, Eye, Clock, TrendingDown, RefreshCw, LayoutGrid, Layers, Maximize2, Minimize2 } from "lucide-react";
 
 const EMPTY_DATA: RealtimeData = {
   activeUsers: 0,
@@ -22,6 +27,9 @@ const EMPTY_DATA: RealtimeData = {
   byDevice: [],
   byPage: [],
   bySource: [],
+  byMinute: [],
+  byEvent: [],
+  byPlatform: [],
 };
 
 type ViewMode = "all" | "by-app";
@@ -47,7 +55,15 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [historical, setHistorical] = useState<HistoricalComparison | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  const historicalRef = useRef<NodeJS.Timeout | null>(null);
+  const { alerts, addAlert, toggleAlert, removeAlert } = useAlerts(user?.uid, data);
+  const { isTVMode, toggleTVMode, currentStreamIndex, setStreamCount } = useTVMode();
+
+  useEffect(() => {
+    setStreamCount(streams.length);
+  }, [streams.length, setStreamCount]);
 
   useEffect(() => {
     if (!user) return;
@@ -92,6 +108,9 @@ export default function DashboardPage() {
           byDevice: mergeByKey(acc.byDevice, r.byDevice, "device", "users"),
           byPage: mergePages(acc.byPage, r.byPage),
           bySource: mergeByKey(acc.bySource, r.bySource, "source", "users"),
+          byMinute: mergeByMinute(acc.byMinute, r.byMinute),
+          byEvent: mergeByKey(acc.byEvent, r.byEvent, "eventName", "count"),
+          byPlatform: mergeByKey(acc.byPlatform, r.byPlatform, "platform", "users"),
         }),
         EMPTY_DATA
       );
@@ -116,6 +135,42 @@ export default function DashboardPage() {
     };
   }, [fetchData, settings?.refreshInterval]);
 
+  // Historical comparison — fetch once per minute
+  useEffect(() => {
+    if (!gaAccessToken || streams.length === 0) return;
+
+    const fetchHistorical = async () => {
+      try {
+        const results = await Promise.all(
+          streams.map((s) => fetchHistoricalComparison(s.propertyId, gaAccessToken))
+        );
+        const merged = results.reduce((acc, r) => ({
+          today: {
+            sessions: acc.today.sessions + r.today.sessions,
+            users: acc.today.users + r.today.users,
+            pageviews: acc.today.pageviews + r.today.pageviews,
+            keyEvents: acc.today.keyEvents + r.today.keyEvents,
+          },
+          yesterday: {
+            sessions: acc.yesterday.sessions + r.yesterday.sessions,
+            users: acc.yesterday.users + r.yesterday.users,
+            pageviews: acc.yesterday.pageviews + r.yesterday.pageviews,
+            keyEvents: acc.yesterday.keyEvents + r.yesterday.keyEvents,
+          },
+        }));
+        setHistorical(merged);
+      } catch {
+        // Historical data is supplementary — don't block on errors
+      }
+    };
+
+    fetchHistorical();
+    historicalRef.current = setInterval(fetchHistorical, 60_000);
+    return () => {
+      if (historicalRef.current) clearInterval(historicalRef.current);
+    };
+  }, [gaAccessToken, streams]);
+
   const vm = settings?.visibleMetrics;
 
   if (loading) {
@@ -133,7 +188,7 @@ export default function DashboardPage() {
         <h1 className="text-xl font-bold text-text-primary">Dashboard</h1>
         <div className="flex items-center gap-3">
           {/* View mode toggle */}
-          <div className="flex rounded-lg border border-border overflow-hidden">
+          {!isTVMode && <div className="flex rounded-lg border border-border overflow-hidden">
             <button
               onClick={() => handleViewMode("all")}
               title="View All"
@@ -160,7 +215,9 @@ export default function DashboardPage() {
             </button>
           </div>
 
-          {viewMode === "all" && (
+          }
+
+          {!isTVMode && viewMode === "all" && (
             <select
               value={selectedStream}
               onChange={(e) => setSelectedStream(e.target.value)}
@@ -180,12 +237,27 @@ export default function DashboardPage() {
             Live
           </div>
 
+          <AlertManagerButton
+            alerts={alerts}
+            onAdd={addAlert}
+            onToggle={toggleAlert}
+            onRemove={removeAlert}
+          />
+
           <button
             onClick={fetchData}
             className="rounded-lg p-1.5 text-text-muted hover:bg-accent-light hover:text-text-primary transition-colors"
             title="Refresh now"
           >
             <RefreshCw className="h-4 w-4" />
+          </button>
+
+          <button
+            onClick={toggleTVMode}
+            className="rounded-lg p-1.5 text-text-muted hover:bg-accent-light hover:text-text-primary transition-colors"
+            title={isTVMode ? "Exit TV mode" : "TV mode"}
+          >
+            {isTVMode ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
           </button>
 
           {lastUpdated && (
@@ -209,16 +281,104 @@ export default function DashboardPage() {
             Add your first GA stream
           </a>
         </div>
+      ) : isTVMode ? (
+        <TVModeView
+          streams={streams}
+          perStreamData={perStreamData}
+          mergedData={data}
+          currentIndex={currentStreamIndex}
+          vm={vm}
+        />
       ) : viewMode === "by-app" ? (
         <ByAppView streams={streams} perStreamData={perStreamData} vm={vm} />
       ) : (
-        <AllView data={data} vm={vm} />
+        <AllView data={data} vm={vm} historical={historical} />
       )}
     </div>
   );
 }
 
-function AllView({ data, vm }: { data: RealtimeData; vm?: Record<string, boolean> | null }) {
+function TVModeView({
+  streams,
+  perStreamData,
+  mergedData,
+  currentIndex,
+  vm,
+}: {
+  streams: GAStream[];
+  perStreamData: Map<string, RealtimeData>;
+  mergedData: RealtimeData;
+  currentIndex: number;
+  vm?: Record<string, boolean> | null;
+}) {
+  const stream = streams[currentIndex];
+  const data = stream ? (perStreamData.get(stream.id!) || EMPTY_DATA) : mergedData;
+  const label = streams.length > 1
+    ? `${stream?.streamName || "All"} (${currentIndex + 1}/${streams.length})`
+    : stream?.streamName || "Dashboard";
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold text-text-primary">{label}</h2>
+        <div className="flex items-center gap-1.5 text-sm text-success">
+          <span className="h-2.5 w-2.5 rounded-full bg-success animate-pulse-dot" />
+          Live
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+        {(!vm || vm.activeUsers) && (
+          <div className="rounded-xl border border-border bg-bg-card p-6 backdrop-blur-sm">
+            <p className="text-sm text-text-muted">Active Users</p>
+            <p className="text-4xl font-bold text-text-primary mt-1">{data.activeUsers.toLocaleString()}</p>
+          </div>
+        )}
+        {(!vm || vm.pageviews) && (
+          <div className="rounded-xl border border-border bg-bg-card p-6 backdrop-blur-sm">
+            <p className="text-sm text-text-muted">Pageviews</p>
+            <p className="text-4xl font-bold text-text-primary mt-1">{data.pageviews.toLocaleString()}</p>
+          </div>
+        )}
+        {(!vm || vm.events) && (
+          <div className="rounded-xl border border-border bg-bg-card p-6 backdrop-blur-sm">
+            <p className="text-sm text-text-muted">Events</p>
+            <p className="text-4xl font-bold text-text-primary mt-1">{data.events.toLocaleString()}</p>
+          </div>
+        )}
+        {(!vm || vm.conversions) && (
+          <div className="rounded-xl border border-border bg-bg-card p-6 backdrop-blur-sm">
+            <p className="text-sm text-text-muted">Conversions</p>
+            <p className="text-4xl font-bold text-text-primary mt-1">{data.conversions.toLocaleString()}</p>
+          </div>
+        )}
+      </div>
+
+      {(!vm || vm.sparkline) && <SparklineChart data={data} />}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {(!vm || vm.geoMap) && <CountryChart data={data} />}
+        {(!vm || vm.topPages) && <TopPagesTable data={data} />}
+      </div>
+    </div>
+  );
+}
+
+function computeTrend(today: number, yesterday: number) {
+  if (yesterday === 0) return undefined;
+  const pct = Math.round(((today - yesterday) / yesterday) * 100);
+  return { value: Math.abs(pct), positive: pct >= 0 };
+}
+
+function AllView({
+  data,
+  vm,
+  historical,
+}: {
+  data: RealtimeData;
+  vm?: Record<string, boolean> | null;
+  historical?: HistoricalComparison | null;
+}) {
   return (
     <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -227,6 +387,7 @@ function AllView({ data, vm }: { data: RealtimeData; vm?: Record<string, boolean
             title="Active Users"
             value={data.activeUsers.toLocaleString()}
             icon={<Users className="h-4 w-4" />}
+            trend={historical ? computeTrend(historical.today.users, historical.yesterday.users) : undefined}
             live
           />
         )}
@@ -235,6 +396,7 @@ function AllView({ data, vm }: { data: RealtimeData; vm?: Record<string, boolean
             title="Pageviews"
             value={data.pageviews.toLocaleString()}
             icon={<Eye className="h-4 w-4" />}
+            trend={historical ? computeTrend(historical.today.pageviews, historical.yesterday.pageviews) : undefined}
           />
         )}
         {(!vm || vm.events) && (
@@ -249,9 +411,14 @@ function AllView({ data, vm }: { data: RealtimeData; vm?: Record<string, boolean
             title="Conversions"
             value={data.conversions.toLocaleString()}
             icon={<TrendingDown className="h-4 w-4" />}
+            trend={historical ? computeTrend(historical.today.keyEvents, historical.yesterday.keyEvents) : undefined}
           />
         )}
       </div>
+
+      {(!vm || vm.sparkline) && (
+        <SparklineChart data={data} />
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         {(!vm || vm.geoMap) && (
@@ -278,6 +445,14 @@ function AllView({ data, vm }: { data: RealtimeData; vm?: Record<string, boolean
           </div>
         )}
       </div>
+
+      {(!vm || vm.topEvents) && (
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+          <div className="lg:col-span-3">
+            <TopEventsTable data={data} />
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -391,6 +566,8 @@ function StreamDetailView({
         <h2 className="text-sm font-semibold text-text-primary">{stream.streamName} - Detailed View</h2>
       </div>
 
+      {(!vm || vm.sparkline) && <SparklineChart data={data} />}
+
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
         {(!vm || vm.geoMap) && (
           <div className="lg:col-span-3">
@@ -416,6 +593,14 @@ function StreamDetailView({
           </div>
         )}
       </div>
+
+      {(!vm || vm.topEvents) && (
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+          <div className="lg:col-span-3">
+            <TopEventsTable data={data} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -433,6 +618,18 @@ function mergeByKey<T extends Record<string, any>>(
   return Array.from(map.entries())
     .map(([k, v]) => ({ [key]: k, [valueKey]: v } as unknown as T))
     .sort((x, y) => (y as any)[valueKey] - (x as any)[valueKey]);
+}
+
+function mergeByMinute(
+  a: RealtimeData["byMinute"],
+  b: RealtimeData["byMinute"]
+): RealtimeData["byMinute"] {
+  if (a.length === 0) return b;
+  if (b.length === 0) return a;
+  return a.map((item, i) => ({
+    minute: item.minute,
+    users: item.users + (b[i]?.users || 0),
+  }));
 }
 
 function mergePages(

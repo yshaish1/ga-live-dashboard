@@ -18,6 +18,9 @@ const METRIC_LABELS: Record<string, string> = {
   conversions: "Conversions",
   newVsReturning: "New vs Returning",
   pageLoadTime: "Page Load Time",
+  sparkline: "Active Users Sparkline",
+  topEvents: "Top Events",
+  platformBreakdown: "Platform Breakdown",
 };
 
 const REFRESH_OPTIONS = [

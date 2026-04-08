@@ -46,6 +46,9 @@ const DEFAULT_SETTINGS: UserSettings = {
     conversions: true,
     newVsReturning: false,
     pageLoadTime: false,
+    sparkline: true,
+    topEvents: true,
+    platformBreakdown: true,
   },
 };
 
@@ -83,4 +86,35 @@ export async function getUserSettings(userId: string): Promise<UserSettings> {
 
 export async function saveUserSettings(userId: string, settings: Partial<UserSettings>) {
   await setDoc(doc(getDb(), "settings", userId), settings, { merge: true });
+}
+
+// Alerts
+
+export type AlertConfig = {
+  id?: string;
+  userId: string;
+  metricKey: "activeUsers" | "pageviews" | "events";
+  condition: "above" | "below";
+  threshold: number;
+  enabled: boolean;
+  createdAt: number;
+};
+
+export async function getAlerts(userId: string): Promise<AlertConfig[]> {
+  const q = query(collection(getDb(), "alerts"), where("userId", "==", userId));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as AlertConfig));
+}
+
+export async function addAlert(alert: Omit<AlertConfig, "id">): Promise<string> {
+  const ref = await addDoc(collection(getDb(), "alerts"), alert);
+  return ref.id;
+}
+
+export async function updateAlert(id: string, data: Partial<AlertConfig>) {
+  await updateDoc(doc(getDb(), "alerts", id), data);
+}
+
+export async function deleteAlert(id: string) {
+  await deleteDoc(doc(getDb(), "alerts", id));
 }

@@ -27,14 +27,35 @@ export async function POST(req: NextRequest) {
     metrics: [{ name: "activeUsers" }],
   };
 
+  const minuteBody = {
+    dimensions: [{ name: "minutesAgo" }],
+    metrics: [{ name: "activeUsers" }],
+  };
+
+  const eventBody = {
+    dimensions: [{ name: "eventName" }],
+    metrics: [{ name: "eventCount" }],
+  };
+
+  const platformBody = {
+    dimensions: [{ name: "platform" }],
+    metrics: [{ name: "activeUsers" }],
+  };
+
   const headers = {
     Authorization: `Bearer ${accessToken}`,
     "Content-Type": "application/json",
   };
 
-  const [mainRes, sourceRes] = await Promise.all([
-    fetch(url, { method: "POST", headers, body: JSON.stringify(mainBody) }),
-    fetch(url, { method: "POST", headers, body: JSON.stringify(sourceBody) }),
+  const fetchGA = (body: object) =>
+    fetch(url, { method: "POST", headers, body: JSON.stringify(body) });
+
+  const [mainRes, sourceRes, minuteRes, eventRes, platformRes] = await Promise.all([
+    fetchGA(mainBody),
+    fetchGA(sourceBody),
+    fetchGA(minuteBody),
+    fetchGA(eventBody),
+    fetchGA(platformBody),
   ]);
 
   if (!mainRes.ok) {
@@ -43,7 +64,21 @@ export async function POST(req: NextRequest) {
   }
 
   const mainData = await mainRes.json();
-  const sourceData = sourceRes.ok ? await sourceRes.json() : { rows: [] };
+  const safeRows = async (res: Response) =>
+    res.ok ? (await res.json()).rows || [] : [];
 
-  return Response.json({ ...mainData, sourceRows: sourceData.rows || [] });
+  const [sourceRows, minuteRows, eventRows, platformRows] = await Promise.all([
+    safeRows(sourceRes),
+    safeRows(minuteRes),
+    safeRows(eventRes),
+    safeRows(platformRes),
+  ]);
+
+  return Response.json({
+    ...mainData,
+    sourceRows,
+    minuteRows,
+    eventRows,
+    platformRows,
+  });
 }

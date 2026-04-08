@@ -7,6 +7,14 @@ export type RealtimeData = {
   byDevice: { device: string; users: number }[];
   byPage: { page: string; users: number; pageviews: number }[];
   bySource: { source: string; users: number }[];
+  byMinute: { minute: number; users: number }[];
+  byEvent: { eventName: string; count: number }[];
+  byPlatform: { platform: string; users: number }[];
+};
+
+export type HistoricalComparison = {
+  today: { sessions: number; users: number; pageviews: number; keyEvents: number };
+  yesterday: { sessions: number; users: number; pageviews: number; keyEvents: number };
 };
 
 function parseRows(rows: any[] | undefined): any[] {
@@ -71,7 +79,45 @@ export function parseRealtimeReport(data: any): RealtimeData {
     .sort((a, b) => b.users - a.users)
     .slice(0, 10);
 
-  return { activeUsers, pageviews, events, conversions, byCountry, byDevice, byPage, bySource };
+  // Parse minutesAgo data for sparkline
+  const minuteMap = new Map<number, number>();
+  for (const row of parseRows(data.minuteRows)) {
+    const minute = parseInt(row.dimensionValues?.[0]?.value || "0");
+    const users = parseInt(row.metricValues?.[0]?.value || "0");
+    minuteMap.set(minute, (minuteMap.get(minute) || 0) + users);
+  }
+  const byMinute = Array.from({ length: 30 }, (_, i) => ({
+    minute: 29 - i,
+    users: minuteMap.get(29 - i) || 0,
+  }));
+
+  // Parse event name data
+  const eventMap = new Map<string, number>();
+  for (const row of parseRows(data.eventRows)) {
+    const eventName = row.dimensionValues?.[0]?.value || "Unknown";
+    const count = parseInt(row.metricValues?.[0]?.value || "0");
+    eventMap.set(eventName, (eventMap.get(eventName) || 0) + count);
+  }
+  const byEvent = Array.from(eventMap.entries())
+    .map(([eventName, count]) => ({ eventName, count }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+
+  // Parse platform data
+  const platformMap = new Map<string, number>();
+  for (const row of parseRows(data.platformRows)) {
+    const platform = row.dimensionValues?.[0]?.value || "Unknown";
+    const users = parseInt(row.metricValues?.[0]?.value || "0");
+    platformMap.set(platform, (platformMap.get(platform) || 0) + users);
+  }
+  const byPlatform = Array.from(platformMap.entries())
+    .map(([platform, users]) => ({ platform, users }))
+    .sort((a, b) => b.users - a.users);
+
+  return {
+    activeUsers, pageviews, events, conversions,
+    byCountry, byDevice, byPage, bySource, byMinute, byEvent, byPlatform,
+  };
 }
 
 export async function fetchRealtimeData(
@@ -91,6 +137,24 @@ export async function fetchRealtimeData(
   }
   const data = await res.json();
   return parseRealtimeReport(data);
+}
+
+export async function fetchHistoricalComparison(
+  propertyId: string,
+  accessToken: string
+): Promise<HistoricalComparison> {
+  const res = await fetch("/api/ga/historical", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ propertyId, accessToken }),
+  });
+
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    console.error("GA Historical API error:", res.status, errorData);
+    throw new Error(errorData.error || "Failed to fetch historical data");
+  }
+  return res.json();
 }
 
 export async function fetchAccountSummaries(accessToken: string) {
