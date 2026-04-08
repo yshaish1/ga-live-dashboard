@@ -16,13 +16,9 @@ import type { RealtimeData } from "@/lib/ga-api";
 const COLORS = ["#6366f1", "#22d3ee", "#a78bfa", "#f59e0b", "#ef4444", "#22c55e"];
 
 export function TrafficSourcesChart({ data }: { data: RealtimeData }) {
-  const sources = [
-    { name: "Direct", value: Math.round(data.activeUsers * 0.35) },
-    { name: "Organic", value: Math.round(data.activeUsers * 0.28) },
-    { name: "Social", value: Math.round(data.activeUsers * 0.18) },
-    { name: "Referral", value: Math.round(data.activeUsers * 0.12) },
-    { name: "Paid", value: Math.round(data.activeUsers * 0.07) },
-  ];
+  const sources = data.bySource.length
+    ? data.bySource.map((s) => ({ name: s.source, value: s.users }))
+    : [{ name: "No data", value: 0 }];
 
   return (
     <div className="rounded-xl border border-border bg-bg-card p-4 backdrop-blur-sm">

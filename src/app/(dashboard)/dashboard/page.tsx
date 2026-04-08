@@ -21,6 +21,7 @@ const EMPTY_DATA: RealtimeData = {
   byCountry: [],
   byDevice: [],
   byPage: [],
+  bySource: [],
 };
 
 type ViewMode = "all" | "by-app";
@@ -90,6 +91,7 @@ export default function DashboardPage() {
           byCountry: mergeByKey(acc.byCountry, r.byCountry, "country", "users"),
           byDevice: mergeByKey(acc.byDevice, r.byDevice, "device", "users"),
           byPage: mergePages(acc.byPage, r.byPage),
+          bySource: mergeByKey(acc.bySource, r.bySource, "source", "users"),
         }),
         EMPTY_DATA
       );
@@ -296,15 +298,7 @@ function ByAppView({
       {/* Summary cards - one per stream */}
       <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
         {streams.map((stream) => {
-          const d = perStreamData.get(stream.id!) || {
-            activeUsers: 0,
-            pageviews: 0,
-            events: 0,
-            conversions: 0,
-            byCountry: [],
-            byDevice: [],
-            byPage: [],
-          };
+          const d = perStreamData.get(stream.id!) || EMPTY_DATA;
           const isExpanded = expandedStream === stream.id;
 
           return (
@@ -373,15 +367,7 @@ function ByAppView({
       {expandedStream && (
         <StreamDetailView
           stream={streams.find((s) => s.id === expandedStream)!}
-          data={perStreamData.get(expandedStream) || {
-            activeUsers: 0,
-            pageviews: 0,
-            events: 0,
-            conversions: 0,
-            byCountry: [],
-            byDevice: [],
-            byPage: [],
-          }}
+          data={perStreamData.get(expandedStream) || EMPTY_DATA}
           vm={vm}
         />
       )}

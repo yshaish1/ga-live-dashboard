@@ -9,7 +9,7 @@ export async function POST(req: NextRequest) {
 
   const url = `https://analyticsdata.googleapis.com/v1beta/properties/${propertyId}:runRealtimeReport`;
 
-  const body = {
+  const mainBody = {
     dimensions: [
       { name: "country" },
       { name: "deviceCategory" },
@@ -18,25 +18,33 @@ export async function POST(req: NextRequest) {
     metrics: [
       { name: "activeUsers" },
       { name: "screenPageViews" },
-      { name: "conversions" },
+      { name: "keyEvents" },
       { name: "eventCount" },
     ],
   };
 
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
-  });
+  const sourceBody = {
+    dimensions: [{ name: "sessionSource" }],
+    metrics: [{ name: "activeUsers" }],
+  };
 
-  if (!res.ok) {
-    const error = await res.text();
-    return Response.json({ error }, { status: res.status });
+  const headers = {
+    Authorization: `Bearer ${accessToken}`,
+    "Content-Type": "application/json",
+  };
+
+  const [mainRes, sourceRes] = await Promise.all([
+    fetch(url, { method: "POST", headers, body: JSON.stringify(mainBody) }),
+    fetch(url, { method: "POST", headers, body: JSON.stringify(sourceBody) }),
+  ]);
+
+  if (!mainRes.ok) {
+    const error = await mainRes.text();
+    return Response.json({ error }, { status: mainRes.status });
   }
 
-  const data = await res.json();
-  return Response.json(data);
+  const mainData = await mainRes.json();
+  const sourceData = sourceRes.ok ? await sourceRes.json() : { rows: [] };
+
+  return Response.json({ ...mainData, sourceRows: sourceData.rows || [] });
 }

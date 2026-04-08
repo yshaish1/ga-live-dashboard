@@ -6,6 +6,7 @@ export type RealtimeData = {
   byCountry: { country: string; users: number }[];
   byDevice: { device: string; users: number }[];
   byPage: { page: string; users: number; pageviews: number }[];
+  bySource: { source: string; users: number }[];
 };
 
 function parseRows(rows: any[] | undefined): any[] {
@@ -60,7 +61,19 @@ export function parseRealtimeReport(data: any): RealtimeData {
     .sort((a, b) => b.users - a.users)
     .slice(0, 10);
 
-  return { activeUsers, pageviews, events, conversions, byCountry, byDevice, byPage };
+  const sourceRows = parseRows(data.sourceRows);
+  const sourceMap = new Map<string, number>();
+  for (const row of sourceRows) {
+    const source = row.dimensionValues?.[0]?.value || "(direct)";
+    const users = parseInt(row.metricValues?.[0]?.value || "0");
+    sourceMap.set(source, (sourceMap.get(source) || 0) + users);
+  }
+  const bySource = Array.from(sourceMap.entries())
+    .map(([source, users]) => ({ source, users }))
+    .sort((a, b) => b.users - a.users)
+    .slice(0, 10);
+
+  return { activeUsers, pageviews, events, conversions, byCountry, byDevice, byPage, bySource };
 }
 
 export async function fetchRealtimeData(
